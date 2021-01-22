@@ -1,6 +1,6 @@
 {
   "name": "nervsys/ns",
-  "description": "A very slight framework for universal API controlling.",
+  "description": "A very slight PHP framework, very easy to use and integrate.",
   "type": "project",
   "license": "Apache-2.0",
   "authors": [
@@ -15,5 +15,7 @@
     "nervsys",
     "framework"
   ],
-  "require": {}
+  "require": {
+    "php": "7.4.0"
+  }
 }
