@@ -3,7 +3,7 @@
 /**
  * Socket Extension
  *
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@ class libSocket extends Factory
      */
     public string $handler_class;
 
-    /** @var \Ext\libMPC $lib_mpc */
+    /** @var libMPC $lib_mpc */
     public libMPC $lib_mpc;
 
     /**
@@ -297,6 +297,7 @@ class libSocket extends Factory
                 $msg .= $buff;
             }
         } catch (\Throwable $throwable) {
+            $this->debug('Close: exception caught [' . $throwable->getMessage() . '] from "' . $sock_id . '".');
             $this->close($sock_id);
             unset($throwable, $sock_id, $msg);
             return '';
@@ -320,6 +321,7 @@ class libSocket extends Factory
         foreach ($msg_tk as $sock_id => $mtk) {
             //Fetch msg from onMessage logic
             if (!is_array($msg_data = json_decode(trim($this->lib_mpc->fetch($mtk)), true))) {
+                $this->debug('Close: message data error read from "' . $sock_id . '".');
                 $this->close($sock_id);
                 continue;
             }
@@ -329,7 +331,7 @@ class libSocket extends Factory
                 'stk' => $this->addMpc('onSend', [
                     'sid'    => $sock_id,
                     'data'   => $msg_data,
-                    'online' => isset($msg_data['to_sid']) ? isset($this->clients[$msg_data['to_sid']]) : false
+                    'online' => (isset($msg_data['to_sid']) && is_string($msg_data['to_sid'])) ? isset($this->clients[$msg_data['to_sid']]) : false
                 ])
             ];
         }
@@ -339,19 +341,24 @@ class libSocket extends Factory
         foreach ($send_data as $sock_id => &$item) {
             //Fetch msg from onSend logic
             if (!is_array($msg_data = json_decode(trim($this->lib_mpc->fetch($item['stk'])), true))) {
+                $this->debug('Close: message data error send to "' . $sock_id . '".');
                 unset($send_data[$sock_id]);
                 $this->close($sock_id);
                 continue;
             }
 
-            //Drop message without receiver
-            if (!isset($msg_data['to_sid'])) {
+            //Remove invalid "to_sid" data
+            $msg_data['to_sid'] ??= [];
+            $msg_data['to_sid'] = array_filter(is_array($msg_data['to_sid']) ? $msg_data['to_sid'] : [$msg_data['to_sid']]);
+
+            //Drop message without receivers
+            if (empty($msg_data['to_sid'])) {
                 unset($send_data[$sock_id]);
                 continue;
             }
 
-            //Copy to_sid value to array
-            $item['to'] = !is_array($msg_data['to_sid']) ? [$msg_data['to_sid']] : $msg_data['to_sid'];
+            //Copy "to_sid" value to receivers
+            $item['to'] = $msg_data['to_sid'];
 
             //Clean up data
             unset($msg_data['to_sid'], $item['stk']);
@@ -377,6 +384,7 @@ class libSocket extends Factory
         try {
             $byte = fwrite($this->clients[$sock_id], $message);
         } catch (\Throwable $throwable) {
+            $this->debug('Close: message failed to send to "' . $sock_id . '".');
             $this->close($sock_id);
             unset($throwable, $sock_id, $message, $byte);
             return 0;
@@ -450,13 +458,15 @@ class libSocket extends Factory
             $duration = ($chk_time - $active_time);
 
             if (60 < $duration) {
+                //On heartbeat interrupted
+                $this->debug('Close: heartbeat interrupted from "' . $sock_id . '".');
                 //Close offline client
                 $this->close($sock_id);
             } elseif (30 < $duration && '' !== $this->ping) {
-                //Send ping message to client
-                $this->sendMsg($sock_id, $this->ping);
                 //On send heartbeat frame message
                 $this->debug('Heartbeat: send "' . $this->ping . '" to "' . $sock_id . '".');
+                //Send ping message to client
+                $this->sendMsg($sock_id, $this->ping);
             }
         }
 
@@ -650,6 +660,7 @@ class libSocket extends Factory
                 if ($sock_id !== $this->master_id) {
                     //Read all client message (binary|string)
                     if ('' === ($socket_msg = $this->readMsg($sock_id))) {
+                        $this->debug('Close: receive empty message from "' . $sock_id . '".');
                         $this->close($sock_id);
                         continue;
                     }
@@ -737,6 +748,7 @@ class libSocket extends Factory
                 if ($sock_id !== $this->master_id) {
                     //Read all client message (WebSocket)
                     if ('' === ($socket_msg = $this->readMsg($sock_id))) {
+                        $this->debug('Close: receive empty message from "' . $sock_id . '".');
                         $this->close($sock_id);
                         continue;
                     }
@@ -760,11 +772,10 @@ class libSocket extends Factory
                             //On respond handshake to new connection
                             $this->debug('Handshake: respond "' . $response . '" to "' . $sock_id . '".');
                         } else {
-                            //Error on handshake
-                            $this->close($sock_id);
-
                             //On reject handshake to new connection
                             $this->debug('Handshake: reject "' . $sock_id . '" to connect.');
+                            //Error on handshake
+                            $this->close($sock_id);
                         }
 
                         unset($accept_clients[$sock_id], $response);
@@ -791,6 +802,7 @@ class libSocket extends Factory
 
                     //Check opcode (connection closed: 8)
                     if (0x8 === $ws_codes['opcode']) {
+                        $this->debug('Close: receive Opcode of "socket closed" from "' . $sock_id . '".');
                         $this->close($sock_id);
                         unset($ws_codes);
                         continue;

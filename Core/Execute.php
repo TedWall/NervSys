@@ -3,8 +3,8 @@
 /**
  * NS Execute module
  *
- * Copyright 2016-2020 Jerry Shaw <jerry-shaw@live.com>
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 Jerry Shaw <jerry-shaw@live.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@ namespace Core;
 use Core\Lib\App;
 use Core\Lib\Hook;
 use Core\Lib\IOUnit;
+use Core\Lib\Router;
 
 /**
  * Class Execute
@@ -32,11 +33,13 @@ use Core\Lib\IOUnit;
  */
 class Execute extends Factory
 {
-    public App    $app;
-    public IOUnit $io_unit;
+    public App     $app;
+    public IOUnit  $io_unit;
+    public Reflect $reflect;
 
-    public array $cmd_cgi;
-    public array $cmd_cli;
+    public array $cgi_cmd  = [];
+    public array $cli_cmd  = [];
+    public array $arg_pool = [];
 
     /**
      * Execute constructor.
@@ -45,21 +48,91 @@ class Execute extends Factory
     {
         $this->app     = App::new();
         $this->io_unit = IOUnit::new();
+        $this->reflect = Reflect::new();
     }
 
     /**
-     * Set commands
+     * Add args for a method
      *
-     * @param array $cmd_group
+     * @param string $class
+     * @param string $method
+     * @param array  $args
      *
      * @return $this
      */
-    public function setCmd(array $cmd_group): self
+    public function addArgs(string $class, string $method, array $args): self
     {
-        $this->cmd_cgi = &$cmd_group['cgi'];
-        $this->cmd_cli = &$cmd_group['cli'];
+        $this->arg_pool[$class . ':' . $method] = &$args;
 
-        unset($cmd_group);
+        unset($class, $method, $args);
+        return $this;
+    }
+
+    /**
+     * Fetch args for a method
+     *
+     * @param string $class
+     * @param string $method
+     * @param array  $inputs
+     *
+     * @return array
+     * @throws \ReflectionException
+     */
+    public function fetchArgs(string $class, string $method, array $inputs): array
+    {
+        $key = $class . ':' . $method;
+
+        if (isset($this->arg_pool[$key])) {
+            $args = &$this->arg_pool[$key];
+            unset($this->arg_pool[$key]);
+        } else {
+            $params = $this->reflect->getArgs($class, $method, $inputs);
+
+            if (!empty($params['diff'])) {
+                $msg = '[' . implode(', ', $params['diff']) . '] in ' . '"' . $class . '::' . $method . '"';
+                throw new \Exception('Argument error or missing: ' . $msg, E_USER_NOTICE);
+            }
+
+            $args = &$params['args'];
+            unset($params);
+        }
+
+        unset($class, $method, $inputs, $key);
+        return $args;
+    }
+
+    /**
+     * Fetch initialed class object
+     *
+     * @param string $class
+     * @param array  $inputs
+     *
+     * @return object
+     * @throws \ReflectionException
+     */
+    public function fetchObj(string $class, array $inputs = []): object
+    {
+        $object = !method_exists($class, '__construct')
+            ? parent::getObj($class)
+            : parent::getObj($class, $this->fetchArgs($class, '__construct', $inputs));
+
+        unset($class, $inputs);
+        return $object;
+    }
+
+    /**
+     * Copy cmd from router stack
+     *
+     * @param Router $router
+     *
+     * @return $this
+     */
+    public function copyCmd(Router $router): self
+    {
+        $this->cgi_cmd = $router->cgi_cmd;
+        $this->cli_cmd = $router->cli_cmd;
+
+        unset($router);
         return $this;
     }
 
@@ -72,39 +145,38 @@ class Execute extends Factory
     {
         $result = [];
 
-        //Init Hook & Reflect
-        $hook    = Hook::new();
-        $reflect = Reflect::new();
+        //Init Hook
+        $hook = Hook::new();
 
         //Process CGI command
-        while (is_array($cmd_pair = array_shift($this->cmd_cgi))) {
+        while (is_array($cmd_pair = array_shift($this->cgi_cmd))) {
             //Extract CMD contents
             [$cmd_class, $cmd_method] = $cmd_pair;
 
-            //Get CMD input name
-            $input_name = $cmd_pair[2] ?? implode('/', $cmd_pair);
+            //Get target CMD path
+            $cmd_path = strtr(trim($cmd_class, '\\'), '\\', '/') . '/' . $cmd_method;
 
-            //Run prepend hooks
-            if (!$hook->passPrepend($this, $reflect, $input_name)) {
+            //Check hooks before CMD
+            if (!$hook->checkPass($this, $cmd_path, $hook->before)) {
                 break;
             }
 
             try {
                 //Run script method
-                $result += $this->runScript($reflect, $cmd_class, $cmd_method, $input_name);
+                $result += $this->runScript($cmd_class, $cmd_method, $cmd_pair[2] ?? $cmd_path);
             } catch (\Throwable $throwable) {
                 $this->app->showDebug($throwable, true);
                 unset($throwable);
                 continue;
             }
 
-            //Run append hooks
-            if (!$hook->passAppend($this, $reflect, $input_name)) {
+            //Check hooks after CMD
+            if (!$hook->checkPass($this, $cmd_path, $hook->after)) {
                 break;
             }
         }
 
-        unset($hook, $reflect, $cmd_pair, $cmd_class, $cmd_method, $input_name);
+        unset($hook, $cmd_pair, $cmd_class, $cmd_method, $cmd_path);
         return $result;
     }
 
@@ -121,7 +193,7 @@ class Execute extends Factory
         $os_unit = OSUnit::new();
 
         //Process CLI command
-        while (is_array($cmd_pair = array_shift($this->cmd_cli))) {
+        while (is_array($cmd_pair = array_shift($this->cli_cmd))) {
             //Extract CMD contents
             [$cmd_name, $exe_path] = $cmd_pair;
 
@@ -147,32 +219,26 @@ class Execute extends Factory
     /**
      * Run script method
      *
-     * @param \Core\Reflect $reflect
-     * @param string        $cmd_class
-     * @param string        $cmd_method
-     * @param string        $input_name
+     * @param string $cmd_class
+     * @param string $cmd_method
+     * @param string $input_name
      *
      * @return array
      * @throws \ReflectionException
      */
-    public function runScript(Reflect $reflect, string $cmd_class, string $cmd_method, string $input_name): array
+    public function runScript(string $cmd_class, string $cmd_method, string $input_name): array
     {
         $result = [];
 
-        //Get method reflection
-        $method_reflect = $reflect->getMethod($cmd_class, $cmd_method);
-
-        //Create class instance
-        $class_object = !$method_reflect->isStatic()
-            ? (!method_exists($cmd_class, '__construct')
-                ? parent::getObj($cmd_class)
-                : parent::getObj($cmd_class, $this->fetchParams($reflect, $cmd_class, '__construct', $this->io_unit->src_input, $cmd_class)))
-            : $cmd_class;
-
         //Call method
         $fn_result = call_user_func(
-            [$class_object, $cmd_method],
-            ...$this->fetchParams($reflect, $cmd_class, $cmd_method, $this->io_unit->src_input, $input_name)
+            [
+                !$this->reflect->getMethod($cmd_class, $cmd_method)->isStatic()
+                    ? $this->fetchObj($cmd_class, $this->io_unit->src_input)
+                    : $cmd_class,
+                $cmd_method
+            ],
+            ...$this->fetchArgs($cmd_class, $cmd_method, $this->io_unit->src_input)
         );
 
         //Collect result
@@ -180,16 +246,16 @@ class Execute extends Factory
             $result[$input_name] = &$fn_result;
         }
 
-        unset($reflect, $cmd_class, $cmd_method, $input_name, $method_reflect, $class_object, $fn_result);
+        unset($cmd_class, $cmd_method, $input_name, $fn_result);
         return $result;
     }
 
     /**
      * Run external program
      *
-     * @param \Core\OSUnit $os_unit
-     * @param string       $cmd_name
-     * @param string       $exe_path
+     * @param OSUnit $os_unit
+     * @param string $cmd_name
+     * @param string $exe_path
      *
      * @return array
      * @throws \Exception
@@ -245,31 +311,5 @@ class Execute extends Factory
 
         unset($os_unit, $cmd_name, $exe_path, $process, $pipes, $pipe);
         return $result;
-    }
-
-    /**
-     * Fetch matched args from inputs
-     *
-     * @param \Core\Reflect $reflect
-     * @param string        $class
-     * @param string        $method
-     * @param array         $inputs
-     * @param string        $name
-     *
-     * @return array
-     * @throws \Exception
-     * @throws \ReflectionException
-     */
-    public function fetchParams(Reflect $reflect, string $class, string $method, array $inputs, string $name = ''): array
-    {
-        $args = $reflect->buildParams($class, $method, $inputs);
-
-        if (!empty($args['diff'])) {
-            $msg = '[' . implode(', ', $args['diff']) . '] in ' . '"' . ('' !== $name ? $name : $class . '\\' . $method) . '"';
-            throw new \Exception('Argument error or missing: ' . $msg, E_USER_WARNING);
-        }
-
-        unset($reflect, $class, $method, $inputs, $name, $args['diff']);
-        return $args['param'];
     }
 }

@@ -3,8 +3,8 @@
 /**
  * NS Router library
  *
- * Copyright 2016-2020 Jerry Shaw <jerry-shaw@live.com>
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 Jerry Shaw <jerry-shaw@live.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,9 +33,12 @@ class Router extends Factory
 {
     public App $app;
 
-    public array $cgi_stack;
-    public array $cli_stack;
-    public array $cli_mapping = [];
+    public array $cgi_cmd   = [];
+    public array $cgi_stack = [];
+
+    public array $cli_cmd      = [];
+    public array $cli_stack    = [];
+    public array $cli_path_map = [];
 
     /**
      * Router constructor.
@@ -44,38 +47,53 @@ class Router extends Factory
     {
         $this->app = App::new();
 
-        $this->cgi_stack[] = [$this, 'cgiRouter'];
-        $this->cli_stack[] = [$this, 'cliRouter'];
+        $this->cgi_stack[] = [$this, 'cgiParser'];
+        $this->cli_stack[] = [$this, 'cliParser'];
     }
 
     /**
-     * Add custom router
+     * Add custom router to CGI stack
      *
      * @param object $router_object
      * @param string $router_method
-     * @param string $target_stack
      *
      * @return $this
      */
-    public function addStack(object $router_object, string $router_method, string $target_stack = 'cgi'): self
+    public function addCgiStack(object $router_object, string $router_method): self
     {
-        array_unshift($this->{$target_stack . '_stack'}, [$router_object, $router_method]);
+        array_unshift($this->cgi_stack, [$router_object, $router_method]);
 
-        unset($router_object, $router_method, $target_stack);
+        unset($router_object, $router_method);
         return $this;
     }
 
     /**
-     * Add executable path mapping
+     * Add custom router to CLI stack
+     *
+     * @param object $router_object
+     * @param string $router_method
+     *
+     * @return $this
+     */
+    public function addCliStack(object $router_object, string $router_method): self
+    {
+        array_unshift($this->cli_stack, [$router_object, $router_method]);
+
+        unset($router_object, $router_method);
+        return $this;
+    }
+
+    /**
+     * Add CLI path map
      *
      * @param string $name
      * @param string $path
      *
      * @return $this
      */
-    public function addMapping(string $name, string $path): self
+    public function addCliMap(string $name, string $path): self
     {
-        $this->cli_mapping[$name] = &$path;
+        $this->cli_path_map[$name] = &$path;
 
         unset($name, $path);
         return $this;
@@ -86,62 +104,59 @@ class Router extends Factory
      *
      * @param string $c
      *
-     * @return array
+     * @return $this
      */
-    public function parse(string $c): array
+    public function parse(string $c): self
     {
-        $cmd_list = ['cli' => [], 'cgi' => []];
-
-        //CMD NOT found
-        if ('' === ($c = trim($c))) {
-            return $cmd_list;
-        }
-
-        //CLI router caller
-        if ($this->app->is_cli) {
-            foreach ($this->cli_stack as $rt) {
-                if (!empty($cmd = $this->callRouter($rt, $c))) {
-                    $cmd_list['cli'] = $cmd;
-                    break;
-                }
+        foreach ($this->cgi_stack as $rt) {
+            if (!empty($cmd = $this->callParser($rt, $c))) {
+                $this->cgi_cmd = $cmd;
+                break;
             }
         }
 
-        //CGI router caller
-        foreach ($this->cgi_stack as $rt) {
-            if (!empty($cmd = $this->callRouter($rt, $c))) {
-                $cmd_list['cgi'] = $cmd;
+        if (!$this->app->is_cli) {
+            unset($c, $rt, $cmd);
+            return $this;
+        }
+
+        foreach ($this->cli_stack as $rt) {
+            if (!empty($cmd = $this->callParser($rt, $c))) {
+                $this->cli_cmd = $cmd;
                 break;
             }
         }
 
         unset($c, $rt, $cmd);
-        return $cmd_list;
+        return $this;
     }
 
     /**
-     * Call router
+     * Get API based CMD
      *
-     * @param array  $rt
-     * @param string $c
+     * @param string $cmd
      *
-     * @return array
+     * @return string
      */
-    private function callRouter(array $rt, string $c): array
+    public function getApiCmd(string $cmd): string
     {
-        $c_list = call_user_func($rt, $c);
+        return 0 !== strpos($cmd, $this->app->api_path . '/')
+            ? $this->app->api_path . '/' . trim($cmd, '/')
+            : trim($cmd, '/');
+    }
 
-        if (!is_array($c_list)) {
-            unset($rt, $c, $c_list);
-            return [];
-        }
-
-        if (!empty($c_list) && count($c_list) === count($c_list, COUNT_RECURSIVE)) {
-            $c_list = [$c_list];
-        }
-
-        unset($rt, $c);
-        return $c_list;
+    /**
+     * Get path based CMD
+     *
+     * @param string $cmd
+     *
+     * @return string
+     */
+    public function getPathCmd(string $cmd): string
+    {
+        return '/' !== $cmd[0] && 0 !== strpos($cmd, $this->app->api_path . '/')
+            ? $this->app->api_path . '/' . trim($cmd, '/')
+            : trim($cmd, '/');
     }
 
     /**
@@ -152,7 +167,7 @@ class Router extends Factory
      * @return array
      * @throws \ReflectionException
      */
-    public function cgiRouter(string $c): array
+    public function cgiParser(string $c): array
     {
         $fn_list  = [];
         $cmd_list = $this->getList($c);
@@ -167,16 +182,13 @@ class Router extends Factory
                 continue;
             }
 
-            //Validate & redirect CMD
-            $cmd_val = !$this->app->is_cli
-                ? (0 !== strpos($cmd, $this->app->api_path) ? $this->app->api_path . '/' . ltrim($cmd, '/') : $cmd)
-                : ('/' !== $cmd[0] && 0 !== strpos($cmd, $this->app->api_path) ? $this->app->api_path . '/' . ltrim($cmd, '/') : $cmd);
+            //Get full CMD value
+            $cmd_val = !$this->app->is_cli ? $this->getApiCmd($cmd) : $this->getPathCmd($cmd);
 
             //Get class & method from CMD
-            $cmd_val = trim($cmd_val, '/');
-            $fn_pos  = strrpos($cmd_val, '/');
-            $class   = '\\' . strtr(substr($cmd_val, 0, $fn_pos), '/', '\\');
-            $method  = substr($cmd_val, $fn_pos + 1);
+            $fn_pos = strrpos($cmd_val, '/');
+            $class  = '\\' . strtr(substr($cmd_val, 0, $fn_pos), '/', '\\');
+            $method = substr($cmd_val, $fn_pos + 1);
 
             //Skip non-exist class
             if (!class_exists($class)) {
@@ -209,21 +221,44 @@ class Router extends Factory
      *
      * @return array
      */
-    public function cliRouter(string $c): array
+    public function cliParser(string $c): array
     {
         $ex_list  = [];
         $cmd_list = $this->getList($c);
 
         foreach ($cmd_list as $cmd) {
-            if (!isset($this->cli_mapping[$cmd])) {
-                continue;
+            if (isset($this->cli_path_map[$cmd])) {
+                $ex_list[] = [$cmd, $this->cli_path_map[$cmd]];
             }
-
-            $ex_list[] = [$cmd, $this->cli_mapping[$cmd]];
         }
 
         unset($c, $cmd_list, $cmd);
         return $ex_list;
+    }
+
+    /**
+     * Call router parser
+     *
+     * @param array  $rt
+     * @param string $c
+     *
+     * @return array
+     */
+    private function callParser(array $rt, string $c): array
+    {
+        $c_list = call_user_func($rt, $c);
+
+        if (!is_array($c_list)) {
+            unset($rt, $c, $c_list);
+            return [];
+        }
+
+        if (!empty($c_list) && count($c_list) === count($c_list, COUNT_RECURSIVE)) {
+            $c_list = [$c_list];
+        }
+
+        unset($rt, $c);
+        return $c_list;
     }
 
     /**

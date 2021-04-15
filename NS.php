@@ -3,8 +3,8 @@
 /**
  * NS System script
  *
- * Copyright 2016-2020 Jerry Shaw <jerry-shaw@live.com>
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 Jerry Shaw <jerry-shaw@live.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,14 +39,14 @@ if (version_compare(PHP_VERSION, '7.4.0', '<')) {
 }
 
 //Define NervSys version
-define('NS_VER', '8.0.0');
+const NS_VER = '8.0.1';
 
 //Define SYSTEM ROOT path
-define('NS_ROOT', __DIR__);
+const NS_ROOT = __DIR__;
 
 //Define JSON formats
-define('JSON_FORMAT', JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS);
-define('JSON_PRETTY', JSON_FORMAT | JSON_PRETTY_PRINT);
+const JSON_FORMAT = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_LINE_TERMINATORS;
+const JSON_PRETTY = JSON_FORMAT | JSON_PRETTY_PRINT;
 
 //Autoload function
 function autoload(string $class_name, string $root_path = NS_ROOT): void
@@ -65,9 +65,6 @@ function autoload(string $class_name, string $root_path = NS_ROOT): void
     unset($class_name, $root_path, $file_name, $class_file);
 }
 
-//Compile/require Factory module
-autoload(Factory::class);
-
 //Register autoload (NS_ROOT based)
 spl_autoload_register(
     static function (string $class_name): void
@@ -77,17 +74,8 @@ spl_autoload_register(
     }
 );
 
-//Init App ENV
-$app = App::new();
-
-//Register autoload ($app->root_path based)
-spl_autoload_register(
-    static function (string $class_name) use ($app): void
-    {
-        autoload($class_name, $app->root_path);
-        unset($class_name, $app);
-    }
-);
+//Init App library
+App::new();
 
 /**
  * Class NS
@@ -99,12 +87,6 @@ class NS extends Factory
      */
     public function __construct()
     {
-        //Init App
-        $app = App::new();
-
-        //Set default timezone
-        date_default_timezone_set($app->timezone);
-
         //Init Error library
         $error = Error::new();
 
@@ -113,26 +95,34 @@ class NS extends Factory
         set_exception_handler($error->exception_handler);
         set_error_handler($error->error_handler);
 
-        //Check CORS Permission
-        CORS::new()->checkPerm($app);
+        //Init App library
+        $app = App::new();
 
-        //Input date parser
+        //Set default timezone
+        date_default_timezone_set($app->timezone);
+
+        //Check CORS Permission
+        CORS::new()->checkPerm($app->is_cli, $app->is_tls);
+
+        //Init IOUnit library
         $io_unit = IOUnit::new();
 
-        //Call data reader
-        call_user_func(!$app->is_cli ? $io_unit->cgi_reader : $io_unit->cli_reader);
+        //Read input data
+        !$app->is_cli ? $io_unit->readCgi() : $io_unit->readCli();
 
-        //Init Execute Module
-        $execute = Execute::new();
+        if ('' !== ($io_unit->src_cmd = trim($io_unit->src_cmd))) {
+            //Init Router library
+            $router = Router::new()->parse($io_unit->src_cmd);
 
-        //Set commands
-        $execute->setCmd(Router::new()->parse($io_unit->src_cmd));
+            //Init Execute Module
+            $execute = Execute::new()->copyCmd($router);
 
-        //Fetch results
-        $io_unit->src_output += $execute->callCgi();
-        $io_unit->src_output += $execute->callCli();
+            //Execute process & fetch results
+            $io_unit->src_output += $execute->callCli();
+            $io_unit->src_output += $execute->callCgi();
+        }
 
         //Output results
-        call_user_func($io_unit->output_handler, $io_unit);
+        $io_unit->output();
     }
 }

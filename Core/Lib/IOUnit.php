@@ -3,8 +3,8 @@
 /**
  * NS I/O Unit library
  *
- * Copyright 2016-2020 Jerry Shaw <jerry-shaw@live.com>
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 Jerry Shaw <jerry-shaw@live.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,9 +30,9 @@ use Core\Factory;
  */
 class IOUnit extends Factory
 {
-    public array $cgi_reader;
-    public array $cli_reader;
-    public array $output_handler;
+    public array $cgi_handler    = [];
+    public array $cli_handler    = [];
+    public array $output_handler = [];
 
     public array $header_keys = [];
     public array $cookie_keys = [];
@@ -50,16 +50,6 @@ class IOUnit extends Factory
 
     protected string $base64_marker  = 'data:text/argv;base64,';
     protected array  $response_types = ['application/json', 'application/xml', 'text/plain', 'text/html'];
-
-    /**
-     * IOUnit constructor.
-     */
-    public function __construct()
-    {
-        $this->cgi_reader     = [$this, 'cgiReader'];
-        $this->cli_reader     = [$this, 'cliReader'];
-        $this->output_handler = [$this, 'outputHandler'];
-    }
 
     /**
      * Set custom ContentType
@@ -103,32 +93,32 @@ class IOUnit extends Factory
     }
 
     /**
-     * Set custom CgiHandler
+     * Set custom CgiReaderHandler
      *
      * @param object $handler_object
      * @param string $handler_method
      *
      * @return $this
      */
-    public function setCgiReader(object $handler_object, string $handler_method): self
+    public function setCgiReaderHandler(object $handler_object, string $handler_method): self
     {
-        $this->cgi_reader = [$handler_object, $handler_method];
+        $this->cgi_handler = [$handler_object, $handler_method];
 
         unset($handler_object, $handler_method);
         return $this;
     }
 
     /**
-     * Set custom CliHandler
+     * Set custom CliReaderHandler
      *
      * @param object $handler_object
      * @param string $handler_method
      *
      * @return $this
      */
-    public function setCliReader(object $handler_object, string $handler_method): self
+    public function setCliReaderHandler(object $handler_object, string $handler_method): self
     {
-        $this->cli_reader = [$handler_object, $handler_method];
+        $this->cli_handler = [$handler_object, $handler_method];
 
         unset($handler_object, $handler_method);
         return $this;
@@ -170,14 +160,14 @@ class IOUnit extends Factory
     }
 
     /**
-     * Append message data
+     * Add message data
      *
      * @param string $msg_key
      * @param array  $msg_data
      *
      * @return $this
      */
-    public function appendMsgData(string $msg_key, array $msg_data): self
+    public function addMsgData(string $msg_key, array $msg_data): self
     {
         $this->src_msg[$msg_key] = array_merge($this->src_msg[$msg_key] ?? [], $msg_data);
 
@@ -188,7 +178,7 @@ class IOUnit extends Factory
     /**
      * Read input data (CGI)
      */
-    public function cgiReader(): void
+    public function readCgi(): void
     {
         //Read accept type
         $this->readAccept();
@@ -202,11 +192,13 @@ class IOUnit extends Factory
 
         //Merge header data
         if (!empty($this->header_keys)) {
+            $this->src_input = array_diff_key($this->src_input, array_flip($this->header_keys));
             $this->src_input += $this->readHeader();
         }
 
         //Merge cookie data
         if (!empty($this->cookie_keys)) {
+            $this->src_input = array_diff_key($this->src_input, array_flip($this->cookie_keys));
             $this->src_input += $this->readCookie();
         }
 
@@ -215,6 +207,11 @@ class IOUnit extends Factory
             $this->src_cmd = $this->src_input['c'];
             unset($this->src_input['c']);
         }
+
+        //Call user registered handler for post process
+        if (!empty($this->cgi_handler)) {
+            call_user_func($this->cgi_handler, $this);
+        }
     }
 
     /**
@@ -222,13 +219,13 @@ class IOUnit extends Factory
      *
      * c: CMD (required)
      * d: Data package (required)
-     * t: Return type (json/xml/plain, default: none, optional)
+     * r: Return type (json/xml/plain, default: none, optional)
      * ... Other CLI params (optional)
      */
-    public function cliReader(): void
+    public function readCli(): void
     {
         //Read opt data
-        $opt = getopt('c:d:t::', [], $optind);
+        $opt = getopt('c:d:r::', [], $optind);
 
         //Read argv data
         $argv = array_slice($_SERVER['argv'], $optind);
@@ -247,12 +244,12 @@ class IOUnit extends Factory
         $this->cli_data_type = 'none';
         $this->content_type  = 'application/json';
 
-        if (isset($opt['t'])) {
-            $this->cli_data_type = in_array($opt['t'], ['json', 'text', 'xml'], true) ? $opt['t'] : $opt['t'] = 'text';
+        if (isset($opt['r'])) {
+            $this->cli_data_type = in_array($opt['r'], ['json', 'text', 'xml'], true) ? $opt['r'] : $opt['r'] = 'text';
 
             //Find correct content type
             foreach ($this->response_types as $type) {
-                if (false !== strpos($type, $opt['t'])) {
+                if (false !== strpos($type, $opt['r'])) {
                     $this->content_type = &$type;
                     break;
                 }
@@ -276,6 +273,65 @@ class IOUnit extends Factory
         }
 
         unset($opt, $optind, $argv);
+
+        //Call user registered handler for post process
+        if (!empty($this->cli_handler)) {
+            call_user_func($this->cli_handler, $this);
+        }
+    }
+
+    /**
+     * Output data source
+     */
+    public function output(): void
+    {
+        if (!empty($this->output_handler)) {
+            call_user_func($this->output_handler, $this);
+        }
+
+        !headers_sent() && header('Content-Type: ' . $this->content_type . '; charset=utf-8');
+
+        $data = 1 === count($this->src_output) ? current($this->src_output) : $this->src_output;
+
+        if (empty($this->src_output) && in_array('object', $this->return_type, true)) {
+            $data = (object)[];
+        }
+
+        if (!empty($this->src_msg)) {
+            $data = $this->src_msg + ['data' => $data];
+        }
+
+        switch ($this->content_type) {
+            case 'application/json':
+                echo json_encode($data, JSON_FORMAT);
+                break;
+
+            case 'application/xml':
+                echo $this->toXml((array)$data);
+                break;
+
+            case 'text/plain':
+                echo is_array($data) ? $this->toString($data) : (string)$data;
+                break;
+
+            case 'text/html':
+                if (is_string($data) || is_numeric($data)) {
+                    echo $data;
+                } elseif (isset($data['data']) && is_string($data['data'])) {
+                    echo $data['data'];
+                } elseif (is_array($data) && is_string($res = current($data))) {
+                    echo $res;
+                } else {
+                    echo 'Invalid HTML Page!';
+                }
+                break;
+
+            default:
+                echo '"' . $this->content_type . '" NOT support!';
+                break;
+        }
+
+        unset($data, $res);
     }
 
     /**
@@ -366,57 +422,6 @@ class IOUnit extends Factory
     }
 
     /**
-     * Output data source
-     *
-     * @param \Core\Lib\IOUnit $io_unit
-     */
-    public function outputHandler(IOUnit $io_unit): void
-    {
-        !headers_sent() && header('Content-Type: ' . $io_unit->content_type . '; charset=utf-8');
-        $data = 1 === count($io_unit->src_output) ? current($io_unit->src_output) : $io_unit->src_output;
-
-        if (empty($io_unit->src_output) && in_array('object', $io_unit->return_type, true)) {
-            $data = (object)[];
-        }
-
-        if (!empty($io_unit->src_msg)) {
-            $data = $io_unit->src_msg + ['data' => $data];
-        }
-
-        switch ($io_unit->content_type) {
-            case 'application/json':
-                echo json_encode($data, JSON_FORMAT);
-                break;
-
-            case 'application/xml':
-                echo $this->toXml((array)$data);
-                break;
-
-            case 'text/plain':
-                echo is_array($data) ? $this->toString($data) : (string)$data;
-                break;
-
-            case 'text/html':
-                if (is_string($data) || is_numeric($data)) {
-                    echo $data;
-                } elseif (isset($data['data']) && is_string($data['data'])) {
-                    echo $data['data'];
-                } elseif (is_array($data) && is_string($res = current($data))) {
-                    echo $res;
-                } else {
-                    echo 'Invalid HTML Page!';
-                }
-                break;
-
-            default:
-                echo '"' . $io_unit->content_type . '" NOT support!';
-                break;
-        }
-
-        unset($io_unit, $data, $res);
-    }
-
-    /**
      * Read accept type
      */
     private function readAccept(): void
@@ -502,7 +507,7 @@ class IOUnit extends Factory
         //Decode data in XML
         libxml_use_internal_errors(true);
         $xml  = simplexml_load_string($input, 'SimpleXMLElement', LIBXML_NOCDATA);
-        $data = false !== $xml ? (array)$xml : [];
+        $data = false !== $xml ? json_decode(json_encode($xml), true) : [];
         libxml_clear_errors();
 
         unset($input, $xml);

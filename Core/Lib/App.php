@@ -3,8 +3,8 @@
 /**
  * NS App library
  *
- * Copyright 2016-2020 Jerry Shaw <jerry-shaw@live.com>
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 Jerry Shaw <jerry-shaw@live.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,16 +30,11 @@ use Core\Factory;
  */
 class App extends Factory
 {
-    public Error $error;
-
     public string $log_path    = '';
     public string $root_path   = '';
-    public string $entry_path  = '';
     public string $script_path = '';
 
-    public string $api_path = 'api';
-    public string $inc_path = 'inc';
-
+    public string $api_path  = 'api';
     public string $client_ip = '0.0.0.0';
     public string $timezone  = 'Asia/Shanghai';
 
@@ -52,63 +47,39 @@ class App extends Factory
      */
     public function __construct()
     {
-        //Init Error
-        $this->error = Error::new();
-
-        //Get script file path
+        //Get server script path
         $this->script_path = strtr($_SERVER['SCRIPT_FILENAME'], '\\/', DIRECTORY_SEPARATOR . DIRECTORY_SEPARATOR);
 
-        //Get absolute path of entry script
+        //Get absolute script path
         if (DIRECTORY_SEPARATOR !== $this->script_path[0] && ':' !== $this->script_path[1]) {
             $this->script_path = getcwd() . DIRECTORY_SEPARATOR . $this->script_path;
         }
 
-        //Get entry path
-        $this->entry_path = dirname($this->script_path);
+        //Make parent path as root_path
+        $root_path = dirname(dirname($this->script_path));
 
-        //Goto parent path
-        $parent_path = dirname($this->entry_path);
+        //Copy root_path to App->root_path
+        $this->root_path = &$root_path;
 
-        //Looking for api directory to get correct root path
-        $this->root_path = is_dir($parent_path . DIRECTORY_SEPARATOR . $this->api_path)
-            ? $parent_path
-            : $this->entry_path;
-
-        //Create global log path
-        $this->createLogPath($this->root_path);
-
-        //Set default include path
-        set_include_path($this->root_path . DIRECTORY_SEPARATOR . $this->inc_path);
-
-        //Skip in CLI mode
-        if ($this->is_cli = ('cli' === PHP_SAPI)) {
-            $this->client_ip = 'Local CLI';
-            return;
-        }
-
-        //Get TLS mode
-        $this->is_tls = (isset($_SERVER['HTTPS']) && 'on' === $_SERVER['HTTPS'])
-            || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && 'https' === $_SERVER['HTTP_X_FORWARDED_PROTO']);
-
-        //Build full IP records
-        $ip_rec = isset($_SERVER['HTTP_X_FORWARDED_FOR'])
-            ? $_SERVER['HTTP_X_FORWARDED_FOR'] . ', ' . $_SERVER['REMOTE_ADDR']
-            : $_SERVER['REMOTE_ADDR'];
-
-        //Build IP list
-        $ip_list = false !== strpos($ip_rec, ', ')
-            ? explode(', ', $ip_rec)
-            : [$ip_rec];
-
-        //Get valid client IP
-        foreach ($ip_list as $value) {
-            if (is_string($addr = filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_IPV6))) {
-                $this->client_ip = &$addr;
-                break;
+        //Register autoload (root_path based)
+        spl_autoload_register(
+            static function (string $class_name) use ($root_path): void
+            {
+                autoload($class_name, $root_path);
+                unset($class_name, $root_path);
             }
+        );
+
+        //Create global log path (root_path/logs)
+        if (!is_dir($this->log_path = $root_path . DIRECTORY_SEPARATOR . 'logs')) {
+            mkdir($this->log_path, 0777, true);
+            chmod($this->log_path, 0777);
         }
 
-        unset($parent_path, $ip_rec, $ip_list, $value, $addr);
+        //Set App environment
+        $this->setEnv();
+
+        unset($root_path);
     }
 
     /**
@@ -157,6 +128,29 @@ class App extends Factory
     }
 
     /**
+     * Add autoload pathname (root_path related)
+     *
+     * @param string $pathname
+     *
+     * @return $this
+     */
+    public function addAutoload(string $pathname): self
+    {
+        $path = $this->root_path . DIRECTORY_SEPARATOR . $pathname;
+
+        spl_autoload_register(
+            static function (string $class_name) use ($path): void
+            {
+                autoload($class_name, $path);
+                unset($class_name, $path);
+            }
+        );
+
+        unset($pathname, $path);
+        return $this;
+    }
+
+    /**
      * Add include pathname (root_path related)
      *
      * @param string $pathname
@@ -172,6 +166,46 @@ class App extends Factory
     }
 
     /**
+     * Parse conf file in JSON/INI
+     *
+     * @param string $file_path
+     * @param bool   $ini_secs
+     *
+     * @return array
+     * @throws \Exception
+     */
+    public function parseConf(string $file_path, bool $ini_secs): array
+    {
+        $file_data = file_get_contents($file_path);
+        $file_ext  = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
+
+        try {
+            switch ($file_ext) {
+                case 'ini':
+                    $config = parse_ini_string($file_data, $ini_secs, INI_SCANNER_TYPED);
+                    break;
+
+                case 'json':
+                    $config = json_decode($file_data, true);
+                    break;
+
+                default:
+                    $config = json_decode($file_data, true) ?? parse_ini_string($file_data, $ini_secs, INI_SCANNER_TYPED);
+                    break;
+            }
+
+            if (!is_array($config)) {
+                throw new \Exception('Configuration ERROR!');
+            }
+        } catch (\Throwable $throwable) {
+            throw new \Exception('Failed to parse "' . $file_path . '": ' . $throwable->getMessage());
+        }
+
+        unset($file_path, $ini_secs, $file_data, $file_ext);
+        return $config;
+    }
+
+    /**
      * Show debug message and continue
      *
      * @param \Throwable $throwable
@@ -179,28 +213,43 @@ class App extends Factory
      */
     public function showDebug(\Throwable $throwable, bool $show_on_cli = false): void
     {
-        if ($this->core_debug && ($show_on_cli ? true : !$this->is_cli)) {
-            $this->error->exceptionHandler($throwable, false);
-        }
-
+        Error::new()->exceptionHandler($throwable, false, $this->core_debug && ($show_on_cli ? true : !$this->is_cli));
         unset($throwable, $show_on_cli);
     }
 
     /**
-     * Create log path
-     *
-     * @param string $log_path
-     *
-     * @return $this
+     * Set App environment
      */
-    private function createLogPath(string $log_path): self
+    private function setEnv(): void
     {
-        if (!is_dir($this->log_path = $log_path . DIRECTORY_SEPARATOR . 'logs')) {
-            mkdir($this->log_path, 0777, true);
-            chmod($this->log_path, 0777);
+        //Check running mode
+        if ($this->is_cli = ('cli' === PHP_SAPI)) {
+            $this->client_ip = 'Local CLI';
+            return;
         }
 
-        unset($log_path);
-        return $this;
+        //Get TLS mode
+        $this->is_tls = (isset($_SERVER['HTTPS']) && 'on' === $_SERVER['HTTPS'])
+            || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && 'https' === $_SERVER['HTTP_X_FORWARDED_PROTO']);
+
+        //Get IP rec
+        $ip_rec = isset($_SERVER['HTTP_X_FORWARDED_FOR'])
+            ? $_SERVER['HTTP_X_FORWARDED_FOR'] . ', ' . $_SERVER['REMOTE_ADDR']
+            : $_SERVER['REMOTE_ADDR'];
+
+        //Get IP list
+        $ip_list = false !== strpos($ip_rec, ', ')
+            ? explode(', ', $ip_rec)
+            : [$ip_rec];
+
+        //Get client IP
+        foreach ($ip_list as $value) {
+            if (is_string($addr = filter_var($value, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_IPV6))) {
+                $this->client_ip = &$addr;
+                break;
+            }
+        }
+
+        unset($ip_rec, $ip_list, $value, $addr);
     }
 }

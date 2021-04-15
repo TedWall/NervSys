@@ -3,8 +3,8 @@
 /**
  * NS CORS library
  *
- * Copyright 2016-2020 Jerry Shaw <jerry-shaw@live.com>
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 Jerry Shaw <jerry-shaw@live.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,8 +30,7 @@ use Core\Factory;
  */
 class CORS extends Factory
 {
-    private array $allowed_list = [];
-
+    private array  $allowed_list  = [];
     private string $allow_headers = 'X-Requested-With, Content-Type, Content-Length';
 
     /**
@@ -57,14 +56,15 @@ class CORS extends Factory
     /**
      * Check CORS permission
      *
-     * @param \Core\Lib\App $app
+     * @param bool $is_cli
+     * @param bool $is_tls
      */
-    public function checkPerm(App $app): void
+    public function checkPerm(bool $is_cli, bool $is_tls): void
     {
         //Server ENV passed
-        if ($app->is_cli
+        if ($is_cli
             || !isset($_SERVER['HTTP_ORIGIN'])
-            || $_SERVER['HTTP_ORIGIN'] === ($app->is_tls ? 'https://' : 'http://') . $_SERVER['HTTP_HOST']) {
+            || $_SERVER['HTTP_ORIGIN'] === ($is_tls ? 'https://' : 'http://') . $_SERVER['HTTP_HOST']) {
             return;
         }
 
@@ -85,6 +85,6 @@ class CORS extends Factory
             exit();
         }
 
-        unset($allow_headers);
+        unset($is_cli, $is_tls, $allow_headers);
     }
 }

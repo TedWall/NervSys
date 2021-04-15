@@ -4,7 +4,7 @@
  * MySQL Extension
  *
  * Copyright 2018-2019 kristenzz <kristenzz1314@gmail.com>
- * Copyright 2019-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2019-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -368,7 +368,7 @@ class libMySQL extends Factory
         $this->runtime_data['where'] ??= [];
         $this->runtime_data['stage'] = 'where';
 
-        if (empty($where)) {
+        if (empty($where = array_filter($where))) {
             return $this;
         }
 
@@ -390,7 +390,7 @@ class libMySQL extends Factory
         $this->runtime_data['having'] ??= [];
         $this->runtime_data['stage']  = 'having';
 
-        if (empty($where)) {
+        if (empty($where = array_filter($where))) {
             return $this;
         }
 
@@ -409,7 +409,7 @@ class libMySQL extends Factory
      */
     public function and(array ...$where): self
     {
-        if (empty($where)) {
+        if (empty($where = array_filter($where))) {
             return $this;
         }
 
@@ -434,7 +434,7 @@ class libMySQL extends Factory
      */
     public function or(array ...$where): self
     {
-        if (empty($where)) {
+        if (empty($where = array_filter($where))) {
             return $this;
         }
 
@@ -658,7 +658,7 @@ class libMySQL extends Factory
 
             //Output result
             if (1 === (1 & $this->explain_type)) {
-                IOUnit::new()->appendMsgData('SQL_EXPLAIN', $result);
+                IOUnit::new()->addMsgData('SQL_EXPLAIN', $result);
             }
 
             //Save result
@@ -774,6 +774,7 @@ class libMySQL extends Factory
     {
         foreach ($params as &$param) {
             if (is_string($param)) {
+                $this->isRaw($param);
                 $param = '"' . addslashes($param) . '"';
             }
         }
@@ -886,10 +887,6 @@ class libMySQL extends Factory
 
             //Data
             if (!is_array($data = current($value))) {
-                if ('' === $data) {
-                    continue;
-                }
-
                 if ('join' !== $this->runtime_data['stage']) {
                     $cond_list[] = '?';
 

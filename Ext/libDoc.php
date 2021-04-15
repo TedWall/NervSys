@@ -3,7 +3,7 @@
 /**
  * API Document Extension
  *
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -134,16 +134,14 @@ class libDoc extends Factory
      */
     public function getComment(string $c): string
     {
-        $cmd_group = Router::new()->parse($c);
-
-        if (empty($cmd_group['cgi'])) {
+        if (empty($cmd_list = Router::new()->parse($c)->cgi_cmd)) {
             return '';
         }
 
-        $cmd_group = current($cmd_group['cgi']);
-        $comment   = $this->getDoc(new \ReflectionMethod($cmd_group[0], $cmd_group[1]));
+        $cmd_list = current($cmd_list);
+        $comment  = $this->getDoc(new \ReflectionMethod($cmd_list[0], $cmd_list[1]));
 
-        unset($c, $cmd_group);
+        unset($c, $cmd_list);
         return $comment;
     }
 

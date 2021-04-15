@@ -3,8 +3,8 @@
 /**
  * NS Factory module
  *
- * Copyright 2016-2020 Jerry Shaw <jerry-shaw@live.com>
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 Jerry Shaw <jerry-shaw@live.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,10 +45,10 @@ class Factory
         if (1 === func_num_args() && is_array($params[0]) && method_exists($class, '__construct')) {
             try {
                 //Try to build args for calling class
-                $fn_args = Reflect::new()->buildParams($class, '__construct', $params[0]);
+                $fn_args = Reflect::new()->getArgs($class, '__construct', $params[0]);
 
                 if (empty($fn_args['diff'])) {
-                    $params = &$fn_args['param'];
+                    $params = &$fn_args['args'];
                 }
 
                 unset($fn_args);

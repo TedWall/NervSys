@@ -3,7 +3,7 @@
 /**
  * HTTP Request Extension
  *
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -310,7 +310,7 @@ class libHttp extends Factory
     }
 
     /**
-     * Fetch response from URL
+     * Fetch response body from URL
      *
      * @param string $url
      *
@@ -454,6 +454,7 @@ class libHttp extends Factory
             $url_unit['path'] = '/';
         }
 
+        //Build query string
         $url_unit['query'] = isset($url_unit['query']) ? '?' . $url_unit['query'] : '';
 
         if (!isset($url_unit['port'])) {
@@ -574,9 +575,8 @@ class libHttp extends Factory
         $curl_opt[CURLOPT_ENCODING]       = &$runtime_data['accept_encoding'];
         $curl_opt[CURLOPT_USERAGENT]      = &$runtime_data['user_agent'];
         $curl_opt[CURLOPT_CUSTOMREQUEST]  = &$runtime_data['http_method'];
-        $curl_opt[CURLOPT_POST]           = ('POST' === $runtime_data['http_method']);
         $curl_opt[CURLOPT_NOBODY]         = !$runtime_data['with_body'];
-        $curl_opt[CURLOPT_HEADER]         = $runtime_data['with_header'] ?? true;
+        $curl_opt[CURLOPT_HEADER]         = true;
 
         unset($runtime_data);
         return $curl_opt;

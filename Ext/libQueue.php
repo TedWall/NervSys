@@ -3,7 +3,7 @@
 /**
  * Queue Extension (on Redis)
  *
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ use Core\Lib\App;
 use Core\Lib\IOUnit;
 use Core\Lib\Router;
 use Core\OSUnit;
-use Core\Reflect;
 
 /**
  * Class libQueue
@@ -50,13 +49,13 @@ class libQueue extends Factory
     /** @var \Redis $redis */
     public \Redis $redis;
 
-    /** @var \Core\Lib\App $app */
+    /** @var App $app */
     private App $app;
 
-    /** @var \Core\Lib\IOUnit $io_unit */
+    /** @var IOUnit $io_unit */
     private IOUnit $io_unit;
 
-    /** @var \Core\OSUnit $os_unit */
+    /** @var OSUnit $os_unit */
     private OSUnit $os_unit;
 
     //Process properties
@@ -249,6 +248,12 @@ class libQueue extends Factory
      */
     public function rollback(string $job_json): int
     {
+        //Decode job data
+        if (is_null($job_data = json_decode($job_json, true))) {
+            unset($job_json, $job_data);
+            return 0;
+        }
+
         //Get failed list key
         $failed_key = $this->getLogKey('failed');
 
@@ -258,17 +263,29 @@ class libQueue extends Factory
             return 0;
         }
 
-        //Decode job data
-        if (is_null($job_data = json_decode($job_json, true))) {
-            unset($job_json, $failed_key, $job_data);
-            return 0;
-        }
-
         //Add job as realtime job in rollback group
         $result = $this->addRealtime('rollback', json_encode($job_data['data'], JSON_FORMAT));
 
         unset($job_json, $failed_key, $job_data);
         return $result;
+    }
+
+    /**
+     * Remove a log
+     *
+     * @param string $type
+     * @param string $job_json
+     *
+     * @return int
+     * @throws \Exception
+     */
+    public function delLog(string $type, string $job_json): int
+    {
+        //Remove from log list
+        $removed = (int)($this->redis->lRem($this->getLogKey($type), $job_json, 1));
+
+        unset($type, $job_json);
+        return $removed;
     }
 
     /**
@@ -527,9 +544,8 @@ class libQueue extends Factory
                 break;
 
             default:
-                //Init Router, Reflect, Execute
+                //Init Router, Execute
                 $router  = Router::new();
-                $reflect = Reflect::new();
                 $execute = Execute::new();
 
                 //Build unit hash and key
@@ -566,14 +582,14 @@ class libQueue extends Factory
 
                     //Execute job
                     if (!empty($job = $this->getJob($job_key, $idle_time))) {
-                        $this->execJob($job[1], $router, $reflect, $execute);
+                        $this->execJob($job[1], $router, $execute);
                     }
                 } while (0 < $this->redis->exists($unit_key) && $this->redis->expire($unit_key, self::WAIT_SCAN) && ++$exec_count < $this->max_exec);
 
                 //On exit
                 $kill_unit($unit_hash);
 
-                unset($router, $reflect, $execute, $unit_hash, $unit_key, $kill_unit, $idle_time, $job_key, $job);
+                unset($router, $execute, $unit_hash, $unit_key, $kill_unit, $idle_time, $job_key, $job);
                 break;
         }
 
@@ -590,10 +606,10 @@ class libQueue extends Factory
         //Detect ENV (only support CLI)
         $this->app = App::new();
 
-        /** @var \Core\Lib\IOUnit io_unit */
+        /** @var IOUnit io_unit */
         $this->io_unit = IOUnit::new();
 
-        /** @var \Core\OSUnit os_unit */
+        /** @var OSUnit os_unit */
         $this->os_unit = OSUnit::new();
     }
 
@@ -777,6 +793,7 @@ class libQueue extends Factory
         //Count running processes
         $runs = count($this->getKeys($this->key_slot['watch']));
 
+        //Calculate left jobs
         if (0 >= ($left = $this->max_fork - $runs + 1)) {
             return;
         }
@@ -811,80 +828,77 @@ class libQueue extends Factory
     /**
      * Execute job
      *
-     * @param string           $data
-     * @param \Core\Lib\Router $router
-     * @param \Core\Reflect    $reflect
-     * @param \Core\Execute    $execute
+     * @param string  $json
+     * @param Router  $router
+     * @param Execute $execute
      */
-    private function execJob(string $data, Router $router, Reflect $reflect, Execute $execute): void
+    private function execJob(string $json, Router $router, Execute $execute): void
     {
-        //Decode data in JSON
-        $input_data = json_decode($data, true);
+        //Decode data from JSON
+        $data = json_decode($json, true);
 
         //Source data parse failed
-        if (!is_array($input_data)) {
-            $this->redis->lPush($this->key_slot['failed'], json_encode(['time' => date('Y-m-d H:i:s'), 'data' => &$data, 'return' => 'Data ERROR!'], JSON_FORMAT));
-
-            unset($data, $router, $reflect, $execute, $input_data);
+        if (!is_array($data)) {
+            $this->redis->lPush($this->key_slot['failed'], json_encode(['time' => date('Y-m-d H:i:s'), 'data' => &$json, 'return' => 'Data ERROR!'], JSON_FORMAT));
+            unset($json, $router, $execute, $data);
             return;
         }
 
         try {
             //Parse CMD
-            $cmd_group = $router->parse($input_data['c']);
+            $router->parse($data['c']);
 
             //Call CGI
-            if (!empty($cmd_group['cgi'])) {
+            if (!empty($router->cgi_cmd)) {
                 //Remap input data
-                $this->io_unit->src_input = $input_data;
+                $this->io_unit->src_input = $data;
                 //Execute CGI command
-                $this->callCgi($cmd_group['cgi'], $reflect, $execute);
+                $this->callCgi($router->cgi_cmd, $execute);
             }
 
             //Call CLI
-            if (!empty($cmd_group['cli'])) {
+            if (!empty($router->cli_cmd)) {
                 //Remap argv data
-                $this->io_unit->src_argv = $input_data['argv'] ?? '';
+                $this->io_unit->src_argv = $data['argv'] ?? '';
                 //Execute CLI command
-                $this->callCli($cmd_group['cli'], $execute);
+                $this->callCli($router->cli_cmd, $execute);
             }
         } catch (\Throwable $throwable) {
-            $this->redis->lPush($this->key_slot['failed'], json_encode(['time' => date('Y-m-d H:i:s'), 'data' => &$input_data, 'return' => $throwable->getMessage()], JSON_FORMAT));
+            $this->redis->lPush($this->key_slot['failed'], json_encode(['time' => date('Y-m-d H:i:s'), 'data' => &$data, 'return' => $throwable->getMessage()], JSON_FORMAT));
             unset($throwable);
         }
 
-        unset($data, $router, $reflect, $execute, $input_data, $cmd_group);
+        unset($json, $router, $execute, $data);
     }
 
     /**
      * Call CGI command
      *
-     * @param array         $cmd_group
-     * @param \Core\Reflect $reflect
-     * @param \Core\Execute $execute
+     * @param array   $cmd_group
+     * @param Execute $execute
      *
      * @throws \ReflectionException
      */
-    private function callCgi(array $cmd_group, Reflect $reflect, Execute $execute): void
+    private function callCgi(array $cmd_group, Execute $execute): void
     {
         //Process CGI command
         while (is_array($cmd_pair = array_shift($cmd_group))) {
             //Extract CMD contents
             [$cmd_class, $cmd_method] = $cmd_pair;
             //Run script method
-            $result = $execute->runScript($reflect, $cmd_class, $cmd_method, $cmd_pair[2] ?? implode('/', $cmd_pair));
+            $result = $execute->runScript($cmd_class, $cmd_method, $cmd_pair[2] ?? implode('/', $cmd_pair));
             //Check result
             !empty($result) && $this->checkJob($result);
         }
 
-        unset($cmd_group, $reflect, $execute, $cmd_pair, $cmd_class, $cmd_method, $result);
+        unset($cmd_group, $execute, $cmd_pair, $cmd_class, $cmd_method, $result);
     }
 
     /**
      * Call CLI command
      *
-     * @param array         $cmd_group
-     * @param \Core\Execute $execute
+     * @param array   $cmd_group
+     * @param Execute $execute
      *
      * @throws \Exception
      */

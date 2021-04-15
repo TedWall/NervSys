@@ -3,8 +3,8 @@
 /**
  * CoreAPI Extension
  *
- * Copyright 2016-2020 take your time <704505144@qq.com>
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 take your time <704505144@qq.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 
 namespace Ext;
 
+use Core\Execute;
 use Core\Factory;
 use Core\Lib\App;
 use Core\Lib\CORS;
@@ -37,29 +38,6 @@ use Core\Lib\Router;
 class libCoreApi extends Factory
 {
     /**
-     * Set autoload to target pathname under root_path
-     *
-     * @param string $pathname
-     *
-     * @return $this
-     */
-    public function autoload(string $pathname): self
-    {
-        $path = App::new()->root_path . DIRECTORY_SEPARATOR . $pathname;
-
-        spl_autoload_register(
-            static function (string $class_name) use ($path): void
-            {
-                autoload($class_name, $path);
-                unset($class_name, $path);
-            }
-        );
-
-        unset($pathname, $path);
-        return $this;
-    }
-
-    /**
      * Generate UUID (string hash based)
      *
      * @param string $string
@@ -75,6 +53,7 @@ class libCoreApi extends Factory
         $start  = 0;
         $codes  = [];
         $length = [8, 4, 4, 4, 12];
+
         $string = hash('md5', $string);
 
         foreach ($length as $len) {
@@ -86,6 +65,21 @@ class libCoreApi extends Factory
 
         unset($string, $start, $codes, $length, $len);
         return $uuid;
+    }
+
+    /**
+     * Add autoload pathname (root_path related)
+     *
+     * @param string $pathname
+     *
+     * @return $this
+     */
+    public function autoload(string $pathname): self
+    {
+        App::new()->addAutoload($pathname);
+
+        unset($pathname);
+        return $this;
     }
 
     /**
@@ -210,32 +204,32 @@ class libCoreApi extends Factory
     }
 
     /**
-     * Set custom CgiHandler
+     * Set custom CgiReaderHandler
      *
      * @param object $handler_object
      * @param string $handler_method
      *
      * @return $this
      */
-    public function setCgiReader(object $handler_object, string $handler_method): self
+    public function setCgiReaderHandler(object $handler_object, string $handler_method): self
     {
-        IOUnit::new()->setCgiReader($handler_object, $handler_method);
+        IOUnit::new()->setCgiReaderHandler($handler_object, $handler_method);
 
         unset($handler_object, $handler_method);
         return $this;
     }
 
     /**
-     * Set custom CliHandler
+     * Set custom CliReaderHandler
      *
      * @param object $handler_object
      * @param string $handler_method
      *
      * @return $this
      */
-    public function setCliReader(object $handler_object, string $handler_method): self
+    public function setCliReaderHandler(object $handler_object, string $handler_method): self
     {
-        IOUnit::new()->setCliReader($handler_object, $handler_method);
+        IOUnit::new()->setCliReaderHandler($handler_object, $handler_method);
 
         unset($handler_object, $handler_method);
         return $this;
@@ -275,16 +269,16 @@ class libCoreApi extends Factory
     }
 
     /**
-     * Append message data
+     * Add message data
      *
      * @param string $msg_key
      * @param array  $msg_data
      *
      * @return $this
      */
-    public function appendMsgData(string $msg_key, array $msg_data): self
+    public function addMsgData(string $msg_key, array $msg_data): self
     {
-        IOUnit::new()->appendMsgData($msg_key, $msg_data);
+        IOUnit::new()->addMsgData($msg_key, $msg_data);
 
         unset($msg_key, $msg_data);
         return $this;
@@ -355,33 +349,48 @@ class libCoreApi extends Factory
     }
 
     /**
-     * Add custom router
+     * Add custom router to CGI stack
      *
      * @param object $router_object
      * @param string $router_method
-     * @param string $target_stack
      *
      * @return $this
      */
-    public function addRouterStack(object $router_object, string $router_method, string $target_stack = 'cgi'): self
+    public function addCgiRouter(object $router_object, string $router_method): self
     {
-        Router::new()->addStack($router_object, $router_method, $target_stack);
+        Router::new()->addCgiStack($router_object, $router_method);
 
-        unset($router_object, $router_method, $target_stack);
+        unset($router_object, $router_method);
         return $this;
     }
 
     /**
-     * Add executable path mapping
+     * Add custom router to CLI stack
+     *
+     * @param object $router_object
+     * @param string $router_method
+     *
+     * @return $this
+     */
+    public function addCliRouter(object $router_object, string $router_method): self
+    {
+        Router::new()->addCliStack($router_object, $router_method);
+
+        unset($router_object, $router_method);
+        return $this;
+    }
+
+    /**
+     * Add CLI path map
      *
      * @param string $name
      * @param string $path
      *
      * @return $this
      */
-    public function addCliMapping(string $name, string $path): self
+    public function addCliMap(string $name, string $path): self
     {
-        Router::new()->addMapping($name, $path);
+        Router::new()->addCliMap($name, $path);
 
         unset($name, $path);
         return $this;
@@ -398,8 +407,7 @@ class libCoreApi extends Factory
      */
     public function hookBefore(string $input_c, string $hook_class, string $hook_method): self
     {
-        Hook::new()->prepend[$input_c] ??= [];
-        array_unshift(Hook::new()->prepend[$input_c], [$hook_class, $hook_method]);
+        Hook::new()->addBefore($input_c, $hook_class, $hook_method);
 
         unset($input_c, $hook_class, $hook_method);
         return $this;
@@ -416,9 +424,26 @@ class libCoreApi extends Factory
      */
     public function hookAfter(string $input_c, string $hook_class, string $hook_method): self
     {
-        Hook::new()->append[$input_c][] = [$hook_class, $hook_method];
+        Hook::new()->addAfter($input_c, $hook_class, $hook_method);
 
         unset($input_c, $hook_class, $hook_method);
+        return $this;
+    }
+
+    /**
+     * Add args for a method
+     *
+     * @param string $class
+     * @param string $method
+     * @param array  $args
+     *
+     * @return $this
+     */
+    public function addArgs(string $class, string $method, array $args): self
+    {
+        Execute::new()->addArgs($class, $method, $args);
+
+        unset($class, $method, $args);
         return $this;
     }
 }

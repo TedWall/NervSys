@@ -3,7 +3,7 @@
 /**
  * Multi-Process Controller Extension
  *
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ use Core\Lib\Error;
 use Core\Lib\IOUnit;
 use Core\Lib\Router;
 use Core\OSUnit;
-use Core\Reflect;
 
 /**
  * Class libMPC
@@ -39,7 +38,6 @@ class libMPC extends Factory
     private App     $app;
     private Error   $error;
     private Router  $router;
-    private Reflect $reflect;
     private Execute $execute;
     private IOUnit  $io_unit;
     private OSUnit  $os_unit;
@@ -138,7 +136,7 @@ class libMPC extends Factory
         $job_count = ++$this->job_count[$this->proc_idx];
 
         //Generate increased job ticket
-        $ticket = base_convert($this->job_mtk[$this->proc_idx]++, 10, 36);
+        $ticket = base_convert($this->job_mtk[$this->proc_idx], 10, 36);
 
         //Add "c" & "mtk" into data
         $data['c']   = &$c;
@@ -153,7 +151,12 @@ class libMPC extends Factory
         //Get current job mtk
         $mtk = (string)$this->proc_idx . ':' . $ticket;
 
-        //Move/Reset idx
+        //Move/Reset job_mtk
+        if ((++$this->job_mtk[$this->proc_idx]) >= PHP_INT_MAX) {
+            $this->job_mtk[$this->proc_idx] = 0;
+        }
+
+        //Move/Reset proc_idx
         if ((++$this->proc_idx) >= $this->proc_cnt) {
             $this->proc_idx = 0;
         }
@@ -227,7 +230,6 @@ class libMPC extends Factory
         //Init modules & libraries
         $this->error   = Error::new();
         $this->router  = Router::new();
-        $this->reflect = Reflect::new();
         $this->execute = Execute::new();
         $this->io_unit = IOUnit::new();
         $this->os_unit = OSUnit::new();
@@ -280,6 +282,7 @@ class libMPC extends Factory
         if ($status['running']) {
             foreach ($this->pipe_list[$idx] as $key => $pipe) {
                 if (0 === $key) {
+                    //Send "exit" signal to child STDIN
                     fwrite($pipe, 'exit' . PHP_EOL);
                 }
 
@@ -332,29 +335,29 @@ class libMPC extends Factory
 
         try {
             //Parse CMD
-            $cmd_group = $this->router->parse($data['c']);
+            $this->router->parse($data['c']);
 
             //Call CGI
-            if (!empty($cmd_group['cgi'])) {
+            if (!empty($this->router->cgi_cmd)) {
                 //Remap input data
                 $this->io_unit->src_input = $data;
 
                 //Process CGI command
-                while (is_array($cmd_pair = array_shift($cmd_group['cgi']))) {
+                while (is_array($cmd_pair = array_shift($this->router->cgi_cmd))) {
                     //Extract CMD contents
                     [$cmd_class, $cmd_method] = $cmd_pair;
                     //Run script method
-                    $result += $this->execute->runScript($this->reflect, $cmd_class, $cmd_method, $cmd_pair[2] ?? implode('/', $cmd_pair));
+                    $result += $this->execute->runScript($cmd_class, $cmd_method, $cmd_pair[2] ?? implode('/', $cmd_pair));
                 }
             }
 
             //Call CLI
-            if (!empty($cmd_group['cli'])) {
+            if (!empty($this->router->cli_cmd)) {
                 //Remap argv data
                 $this->io_unit->src_argv = $data['argv'] ?? '';
 
                 //Process CLI command
-                while (is_array($cmd_pair = array_shift($cmd_group['cli']))) {
+                while (is_array($cmd_pair = array_shift($this->router->cli_cmd))) {
                     //Extract CMD contents
                     [$cmd_name, $exe_path] = $cmd_pair;
 
@@ -369,7 +372,7 @@ class libMPC extends Factory
             unset($throwable);
         }
 
-        unset($data, $cmd_group, $cmd_pair, $cmd_class, $cmd_method, $cmd_name, $exe_path);
+        unset($data, $cmd_pair, $cmd_class, $cmd_method, $cmd_name, $exe_path);
         return $result;
     }
 

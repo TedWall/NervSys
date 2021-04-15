@@ -3,8 +3,8 @@
 /**
  * Errno Extension
  *
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
- * Copyright 2016-2020 vicky <904428723@qq.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 vicky <904428723@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,40 +32,42 @@ use Core\Lib\IOUnit;
  */
 class libErrno extends Factory
 {
-    public string $path;
+    public App $app;
+
     private array $msg_pool   = [];
     private bool  $multi_lang = false;
 
     /**
      * libErrno constructor.
      *
-     * @param string $pathname
-     * @param bool   $multi_lang
+     * @param bool $multi_lang
      */
-    public function __construct(string $pathname, bool $multi_lang = false)
+    public function __construct(bool $multi_lang = false)
     {
-        $this->path       = App::new()->root_path . DIRECTORY_SEPARATOR . $pathname;
+        $this->app = App::new();
+
         $this->multi_lang = &$multi_lang;
 
-        unset($pathname, $multi_lang);
+        unset($multi_lang);
     }
 
     /**
-     * Load error file
+     * Load error file (root_path based)
      *
      * @param string $file_name
      *
      * @return $this
+     * @throws \Exception
      */
     public function load(string $file_name): self
     {
-        $msg_file = $this->path . DIRECTORY_SEPARATOR . $file_name . '.ini';
-
-        if (is_file($msg_file) && is_array($data = parse_ini_file($msg_file, false, INI_SCANNER_TYPED))) {
-            $this->msg_pool = array_replace($this->msg_pool, $data);
+        if (!is_file($file_path = $this->app->root_path . DIRECTORY_SEPARATOR . $file_name)) {
+            throw new \Exception('"' . $file_path . '" NOT found!');
         }
 
-        unset($file_name, $msg_file, $data);
+        $this->msg_pool = array_replace_recursive($this->msg_pool, $this->app->parseConf($file_path, false));
+
+        unset($file_name, $file_path);
         return $this;
     }
 

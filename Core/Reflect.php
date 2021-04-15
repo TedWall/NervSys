@@ -3,8 +3,8 @@
 /**
  * NS Reflect module
  *
- * Copyright 2016-2020 Jerry Shaw <jerry-shaw@live.com>
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 Jerry Shaw <jerry-shaw@live.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -153,7 +153,7 @@ class Reflect extends Factory
     }
 
     /**
-     * Build params for a method
+     * Get arguments for a method
      *
      * @param string $class
      * @param string $method
@@ -162,10 +162,10 @@ class Reflect extends Factory
      * @return array
      * @throws \ReflectionException
      */
-    public function buildParams(string $class, string $method, array $inputs): array
+    public function getArgs(string $class, string $method, array $inputs): array
     {
         //Default result
-        $result = ['param' => [], 'diff' => []];
+        $result = ['args' => [], 'diff' => []];
 
         //Get needed params
         $need_params = $this->getParams($class, $method);
@@ -176,14 +176,14 @@ class Reflect extends Factory
 
             //Dependency injection
             if (!is_null($param_info['class'])) {
-                $result['param'][] = parent::getObj($param_info['class']);
+                $result['args'][] = parent::getObj($param_info['class']);
                 continue;
             }
 
             //Check param and default value
             if (!isset($inputs[$param_info['name']])) {
                 $param_info['has_default']
-                    ? $result['param'][] = $param_info['default']
+                    ? $result['args'][] = $param_info['default']
                     : $result['diff'][] = $param_info['name'];
                 continue;
             }
@@ -192,36 +192,36 @@ class Reflect extends Factory
             switch ($param_info['type']) {
                 case 'int':
                     is_numeric($inputs[$param_info['name']])
-                        ? $result['param'][] = (int)$inputs[$param_info['name']]
+                        ? $result['args'][] = (int)$inputs[$param_info['name']]
                         : $result['diff'][] = $param_info['name'];
                     break;
                 case 'bool':
                     is_bool($inputs[$param_info['name']])
-                        ? $result['param'][] = (bool)$inputs[$param_info['name']]
+                        ? $result['args'][] = (bool)$inputs[$param_info['name']]
                         : $result['diff'][] = $param_info['name'];
                     break;
                 case 'float':
                     is_numeric($inputs[$param_info['name']])
-                        ? $result['param'][] = (float)$inputs[$param_info['name']]
+                        ? $result['args'][] = (float)$inputs[$param_info['name']]
                         : $result['diff'][] = $param_info['name'];
                     break;
                 case 'array':
                     is_array($inputs[$param_info['name']]) || is_object($inputs[$param_info['name']])
-                        ? $result['param'][] = (array)$inputs[$param_info['name']]
+                        ? $result['args'][] = (array)$inputs[$param_info['name']]
                         : $result['diff'][] = $param_info['name'];
                     break;
                 case 'string':
                     is_string($inputs[$param_info['name']]) || is_numeric($inputs[$param_info['name']])
-                        ? $result['param'][] = trim((string)$inputs[$param_info['name']])
+                        ? $result['args'][] = trim((string)$inputs[$param_info['name']])
                         : $result['diff'][] = $param_info['name'];
                     break;
                 case 'object':
                     is_object($inputs[$param_info['name']]) || is_array($inputs[$param_info['name']])
-                        ? $result['param'][] = (object)$inputs[$param_info['name']]
+                        ? $result['args'][] = (object)$inputs[$param_info['name']]
                         : $result['diff'][] = $param_info['name'];
                     break;
                 default:
-                    $result['param'][] = $inputs[$param_info['name']];
+                    $result['args'][] = $inputs[$param_info['name']];
                     break;
             }
         }

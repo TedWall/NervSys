@@ -3,7 +3,7 @@
 /**
  * ConfGet Extension
  *
- * Copyright 2016-2020 秋水之冰 <27206617@qq.com>
+ * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,51 +30,35 @@ use Core\Lib\App;
  */
 class libConfGet extends Factory
 {
-    public string $path;
-    public array  $pool = [];
+    public App $app;
+
+    public array $conf_pool = [];
 
     /**
      * libConfGet constructor.
-     *
-     * @param string $pathname
      */
-    public function __construct(string $pathname)
+    public function __construct()
     {
-        $this->path = App::new()->root_path . DIRECTORY_SEPARATOR . $pathname;
-        unset($pathname);
+        $this->app = App::new();
     }
 
     /**
-     * Load config file (no extension)
+     * Load config file (root_path based)
      *
-     * @param string $filename
+     * @param string $file_name
      *
      * @return $this
      * @throws \Exception
      */
-    public function load(string $filename): self
+    public function load(string $file_name): self
     {
-        if (!is_file($file_path = $this->path . DIRECTORY_SEPARATOR . $filename . '.conf')) {
+        if (!is_file($file_path = $this->app->root_path . DIRECTORY_SEPARATOR . $file_name)) {
             throw new \Exception('"' . $file_path . '" NOT found!');
         }
 
-        $config = file_get_contents($file_path);
+        $this->conf_pool = array_replace_recursive($this->conf_pool, $this->app->parseConf($file_path, true));
 
-        if (is_null($data = json_decode($config, true))) {
-            try {
-                $data = parse_ini_string($config, true, INI_SCANNER_TYPED);
-            } catch (\Throwable $throwable) {
-                throw new \Exception('Failed to parse "' . $file_path . '"!');
-            }
-        }
-
-        if (!is_array($data)) {
-            throw new \Exception('Type of "' . $filename . '.conf" NOT support!');
-        }
-
-        $this->pool = array_replace_recursive($this->pool, $data);
-
-        unset($filename, $file_path, $config, $data);
+        unset($file_name, $file_path);
         return $this;
     }
 
@@ -87,6 +71,6 @@ class libConfGet extends Factory
      */
     public function use(string $section): array
     {
-        return $this->pool[$section] ?? [];
+        return $this->conf_pool[$section] ?? [];
     }
 }
