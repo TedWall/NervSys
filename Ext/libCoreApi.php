@@ -68,17 +68,18 @@ class libCoreApi extends Factory
     }
 
     /**
-     * Add autoload pathname (root_path related)
+     * Add autoload pathname (root related)
      *
      * @param string $pathname
+     * @param string $root
      *
      * @return $this
      */
-    public function autoload(string $pathname): self
+    public function autoload(string $pathname, string $root = ''): self
     {
-        App::new()->addAutoload($pathname);
+        App::new()->addAutoload($pathname, $root);
 
-        unset($pathname);
+        unset($pathname, $root);
         return $this;
     }
 
@@ -128,17 +129,18 @@ class libCoreApi extends Factory
     }
 
     /**
-     * Add include pathname (root_path related)
+     * Add include pathname (root related)
      *
      * @param string $pathname
+     * @param string $root
      *
      * @return $this
      */
-    public function addIncPath(string $pathname): self
+    public function addIncPath(string $pathname, string $root = ''): self
     {
-        App::new()->addIncPath($pathname);
+        App::new()->addIncPath($pathname, $root);
 
-        unset($pathname);
+        unset($pathname, $root);
         return $this;
     }
 

@@ -2,7 +2,7 @@
 
 README: [English](README.md) | [简体中文](README_zh-CN.md)
 
-[![release](https://img.shields.io/badge/release-8.0.0-blue?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/releases)
+[![release](https://img.shields.io/badge/release-8.0.2-blue?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/releases)
 [![issues](https://img.shields.io/github/issues/Jerry-Shaw/NervSys?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/issues)
 [![contributors](https://img.shields.io/github/contributors/Jerry-Shaw/NervSys?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/graphs/contributors)
 [![last-commit](https://img.shields.io/github/last-commit/Jerry-Shaw/NervSys?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/commits/master)
@@ -192,7 +192,7 @@ class user
 - [x] 第三方错误处理模块支持
 - [x] 第三方数据读取/输出模块支持
 - [x] 基于路径的钩子函数注册功能支持
-- [ ] Socket 相关功能
+- [x] Socket 相关功能
 - [ ] ML/AI 相关内置路由
 - [ ] 更多详细的文档和范例
 

@@ -36,6 +36,7 @@ class App extends Factory
 
     public string $api_path  = 'api';
     public string $client_ip = '0.0.0.0';
+    public string $hostname  = 'localhost';
     public string $timezone  = 'Asia/Shanghai';
 
     public bool $is_cli     = false;
@@ -128,15 +129,16 @@ class App extends Factory
     }
 
     /**
-     * Add autoload pathname (root_path related)
+     * Add autoload pathname (root related)
      *
      * @param string $pathname
+     * @param string $root
      *
      * @return $this
      */
-    public function addAutoload(string $pathname): self
+    public function addAutoload(string $pathname, string $root = ''): self
     {
-        $path = $this->root_path . DIRECTORY_SEPARATOR . $pathname;
+        $path = $this->getRootPath($root) . DIRECTORY_SEPARATOR . $pathname;
 
         spl_autoload_register(
             static function (string $class_name) use ($path): void
@@ -146,27 +148,59 @@ class App extends Factory
             }
         );
 
-        unset($pathname, $path);
+        unset($pathname, $root, $path);
         return $this;
     }
 
     /**
-     * Add include pathname (root_path related)
+     * Add include pathname (root related)
      *
      * @param string $pathname
+     * @param string $root
      *
      * @return $this
      */
-    public function addIncPath(string $pathname): self
+    public function addIncPath(string $pathname, string $root = ''): self
     {
-        set_include_path($this->root_path . DIRECTORY_SEPARATOR . $pathname . PATH_SEPARATOR . get_include_path());
+        set_include_path($this->getRootPath($root) . DIRECTORY_SEPARATOR . $pathname . PATH_SEPARATOR . get_include_path());
 
-        unset($pathname);
+        unset($pathname, $root);
         return $this;
     }
 
     /**
-     * Parse conf file in JSON/INI
+     * Get root path (definable)
+     *
+     * @param string $root
+     *
+     * @return string
+     */
+    public function getRootPath(string $root = ''): string
+    {
+        return '' === $root ? $this->root_path : $root;
+    }
+
+    /**
+     * Get config file path (root based)
+     *
+     * @param string $filename
+     * @param string $root
+     *
+     * @return string
+     * @throws \Exception
+     */
+    public function getConfPath(string $filename, string $root = ''): string
+    {
+        if (!is_file($file_path = $this->getRootPath($root) . DIRECTORY_SEPARATOR . $filename)) {
+            throw new \Exception('"' . $file_path . '" NOT found!');
+        }
+
+        unset($filename, $root);
+        return $file_path;
+    }
+
+    /**
+     * Parse config file in JSON/INI
      *
      * @param string $file_path
      * @param bool   $ini_secs
@@ -213,7 +247,7 @@ class App extends Factory
      */
     public function showDebug(\Throwable $throwable, bool $show_on_cli = false): void
     {
-        Error::new()->exceptionHandler($throwable, false, $this->core_debug && ($show_on_cli ? true : !$this->is_cli));
+        Error::new()->exceptionHandler($throwable, false, $this->core_debug && ($show_on_cli || !$this->is_cli));
         unset($throwable, $show_on_cli);
     }
 
@@ -222,6 +256,15 @@ class App extends Factory
      */
     private function setEnv(): void
     {
+        //Get hostname
+        $hostname = gethostname();
+
+        if (is_string($hostname)) {
+            $this->hostname = &$hostname;
+        }
+
+        unset($hostname);
+
         //Check running mode
         if ($this->is_cli = ('cli' === PHP_SAPI)) {
             $this->client_ip = 'Local CLI';

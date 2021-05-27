@@ -2,7 +2,7 @@
 
 README: [English](README.md) | [简体中文](README_zh-CN.md)
 
-[![release](https://img.shields.io/badge/release-8.0.0-blue?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/releases)
+[![release](https://img.shields.io/badge/release-8.0.2-blue?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/releases)
 [![issues](https://img.shields.io/github/issues/Jerry-Shaw/NervSys?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/issues)
 [![contributors](https://img.shields.io/github/contributors/Jerry-Shaw/NervSys?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/graphs/contributors)
 [![last-commit](https://img.shields.io/github/last-commit/Jerry-Shaw/NervSys?style=flat-square)](https://github.com/Jerry-Shaw/NervSys/commits/master)
@@ -200,7 +200,7 @@ hook related functions, etc...
 - [x] Custom error handler module support
 - [x] Custom data reader/output module support
 - [x] Path based hook registration function support
-- [ ] Socket related functions
+- [x] Socket related functions
 - [ ] ML/AI based internal router
 - [ ] More detailed documents and demos
 

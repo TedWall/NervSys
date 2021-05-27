@@ -90,6 +90,15 @@ class libQueue extends Factory
     private array $unit_handler = [];
 
     /**
+     * libQueue constructor.
+     */
+    public function __construct()
+    {
+        //Init App
+        $this->app = App::new();
+    }
+
+    /**
      * Bind to Redis connection
      *
      * @param \Redis $redis
@@ -123,6 +132,21 @@ class libQueue extends Factory
     }
 
     /**
+     * Set the maximum number of success logs
+     *
+     * @param int $number
+     *
+     * @return $this
+     */
+    public function setMaxHistory(int $number): self
+    {
+        $this->max_hist = &$number;
+
+        unset($number);
+        return $this;
+    }
+
+    /**
      * Set custom UnitHandler
      *
      * @param string $handler_class
@@ -148,7 +172,6 @@ class libQueue extends Factory
      * @param int    $time_wait in seconds
      *
      * @return int -1: unique job blocked; 0: add job failed; other: add job done with total job length in groups
-     * @throws \Exception
      */
     public function add(string $cmd, array $data = [], string $group = 'main', string $type_mask = self::TYPE_REALTIME, int $time_wait = 0): int
     {
@@ -184,22 +207,16 @@ class libQueue extends Factory
 
         //Add realtime job
         if (($type_mask & self::TYPE_REALTIME) === self::TYPE_REALTIME) {
-            if (0 === $add_res = $this->addRealtime($group, $job_data)) {
-                throw new \Exception('Realtime job add failed!', E_USER_WARNING);
+            if (0 < $add_res = $this->addRealtime($group, $job_data)) {
+                $job_len += $add_res;
             }
-
-            //Count group jobs
-            $job_len += $add_res;
         }
 
         //Add delay job
         if (($type_mask & self::TYPE_DELAY) === self::TYPE_DELAY) {
-            if (0 === $add_res = $this->addDelay($group, $job_data, $time_wait)) {
-                throw new \Exception('Delay job add failed!', E_USER_WARNING);
+            if (0 < $add_res = $this->addDelay($group, $job_data, $time_wait)) {
+                $job_len += $add_res;
             }
-
-            //Count group jobs
-            $job_len += $add_res;
         }
 
         unset($cmd, $data, $group, $type_mask, $time_wait, $job_data, $add_res);
@@ -208,12 +225,10 @@ class libQueue extends Factory
 
     /**
      * Kill worker process
-     * Caution: Do NOT expose "kill" to TrustZone directly
      *
      * @param string $proc_hash
      *
      * @return int
-     * @throws \Exception
      */
     public function kill(string $proc_hash = ''): int
     {
@@ -244,7 +259,6 @@ class libQueue extends Factory
      * @param string $job_json
      *
      * @return int
-     * @throws \Exception
      */
     public function rollback(string $job_json): int
     {
@@ -277,7 +291,6 @@ class libQueue extends Factory
      * @param string $job_json
      *
      * @return int
-     * @throws \Exception
      */
     public function delLog(string $type, string $job_json): int
     {
@@ -294,7 +307,6 @@ class libQueue extends Factory
      * @param string $type
      *
      * @return int
-     * @throws \Exception
      */
     public function clearLogs(string $type = 'success'): int
     {
@@ -313,7 +325,6 @@ class libQueue extends Factory
      * @param int    $end
      *
      * @return array
-     * @throws \Exception
      */
     public function getLogs(string $type = 'success', int $start = 0, int $end = -1): array
     {
@@ -347,11 +358,9 @@ class libQueue extends Factory
      * Get queue list
      *
      * @return array
-     * @throws \Exception
      */
     public function getQueueList(): array
     {
-        //Build process keys
         $this->buildKeys();
 
         return $this->redis->sMembers($this->key_slot['listen']);
@@ -361,36 +370,33 @@ class libQueue extends Factory
      * Get process list
      *
      * @return array
-     * @throws \Exception
      */
     public function getProcList(): array
     {
-        //Build process keys
         $this->buildKeys();
 
         return $this->getKeys($this->key_slot['watch']);
     }
 
     /**
-     * Queue master handler
+     * Start queue main process
      *
      * @param int $max_fork
      * @param int $max_exec
-     * @param int $max_hist
      *
      * @throws \Exception
      */
-    public function callMasterHandler(int $max_fork = 10, int $max_exec = 1000, int $max_hist = 2000): void
+    public function start(int $max_fork = 10, int $max_exec = 1000): void
     {
         //Initialize
-        $this->initProc();
+        $this->initEnv();
 
         //Build process keys
         $this->buildKeys();
 
-        //Set default unitHandler
+        //Check unitHandler register
         if (empty($this->unit_handler)) {
-            throw new \Exception('Queue unit handler NOT set!', E_USER_ERROR);
+            throw new \Exception('UnitHandler NOT set!');
         }
 
         //Set max forks
@@ -403,19 +409,14 @@ class libQueue extends Factory
             $this->max_exec = &$max_exec;
         }
 
-        //Set max history records
-        if (0 < $max_hist) {
-            $this->max_hist = &$max_hist;
-        }
-
-        unset($max_fork, $max_exec, $max_hist);
+        unset($max_fork, $max_exec);
 
         //Get idle time
         $idle_time = $this->getIdleTime();
 
         //Build master hash and key
         $master_hash = hash('crc32b', uniqid(mt_rand(), true));
-        $master_key  = $this->key_slot['worker'] . ($_SERVER['HOSTNAME'] ?? 'master');
+        $master_key  = $this->key_slot['worker'] . $this->app->hostname;
 
         //Exit when master process exists
         if (!$this->redis->setnx($master_key, $master_hash)) {
@@ -449,7 +450,7 @@ class libQueue extends Factory
 
         //Build unit command
         $unit_cmd = '"' . $this->os_unit->getPhpPath() . '" "' . $this->app->script_path . '" -t"json" ';
-        $unit_cmd .= '-c"' . $this->io_unit->encodeData('/' . strtr($this->unit_handler[0], '\\', '/') . '/' . $this->unit_handler[1]) . '" ';
+        $unit_cmd .= '-c"' . $this->io_unit->encodeData('/' . $this->unit_handler[0] . '/' . $this->unit_handler[1]) . '" ';
 
         //Build delay command
         $cmd_delay = $this->os_unit->setCmd($unit_cmd . '-d"' . $this->io_unit->encodeData(json_encode(['type' => 'delay', 'name' => $this->key_name], JSON_FORMAT)) . '"')->setAsBg()->setEnvPath()->fetchCmd();
@@ -459,7 +460,7 @@ class libQueue extends Factory
 
         do {
             //Call delay unit
-            $this->callUnitDelay($cmd_delay);
+            $this->callDelay($cmd_delay);
 
             //Get process status
             $is_valid   = ($this->redis->get($master_key) === $master_hash);
@@ -481,7 +482,7 @@ class libQueue extends Factory
             $this->redis->rPush($job[0], $job[1]);
 
             //Call realtime unit
-            $this->callUnitRealtime($cmd_realtime);
+            $this->callRealtime($cmd_realtime);
         } while ($is_valid && $is_running);
 
         //On exit
@@ -495,13 +496,11 @@ class libQueue extends Factory
      *
      * @param string $type
      * @param string $name
-     *
-     * @throws \Exception
      */
-    public function callUnitHandler(string $type = 'realtime', string $name = 'main:'): void
+    public function unitHandler(string $type = 'realtime', string $name = 'main:'): void
     {
         //Initialize
-        $this->initProc();
+        $this->initEnv();
 
         //Set process name
         $this->key_name = &$name;
@@ -597,15 +596,10 @@ class libQueue extends Factory
     }
 
     /**
-     * Process initialize
-     *
-     * @throws \Exception
+     * Initialize process ENV
      */
-    private function initProc(): void
+    private function initEnv(): void
     {
-        //Detect ENV (only support CLI)
-        $this->app = App::new();
-
         /** @var IOUnit io_unit */
         $this->io_unit = IOUnit::new();
 
@@ -615,30 +609,26 @@ class libQueue extends Factory
 
     /**
      * Build runtime keys
-     *
-     * @throws \Exception
      */
     private function buildKeys(): void
     {
-        if (!empty($this->key_slot)) {
-            return;
+        if (empty($this->key_slot)) {
+            //Build prefix
+            $prefix = self::KEY_PREFIX . $this->key_name;
+
+            //Build queue key slot
+            foreach ($this->key_list as $key => $value) {
+                $this->key_slot[$key] = $prefix . $value;
+            }
+
+            //Fill watch key slot
+            $this->key_slot['watch'] .= $this->app->hostname;
+            unset($prefix, $key, $value);
         }
-
-        //Build prefix
-        $prefix = self::KEY_PREFIX . $this->key_name;
-
-        //Build queue key slot
-        foreach ($this->key_list as $key => $value) {
-            $this->key_slot[$key] = $prefix . $value;
-        }
-
-        //Fill watch key slot
-        $this->key_slot['watch'] .= $_SERVER['HOSTNAME'] ?? 'worker';
-        unset($prefix, $key, $value);
     }
 
     /**
-     * Add realtime job
+     * Add a realtime job
      *
      * @param string $group
      * @param string $data
@@ -658,7 +648,7 @@ class libQueue extends Factory
     }
 
     /**
-     * Add delay job
+     * Add a delay job
      *
      * @param string $group
      * @param string $data
@@ -690,7 +680,7 @@ class libQueue extends Factory
     }
 
     /**
-     * Get job from queue stack
+     * Get a job from queue stack
      *
      * @param string $job_key
      * @param int    $idle_time
@@ -701,14 +691,16 @@ class libQueue extends Factory
     {
         //Check job length & get job content
         if (0 < $this->redis->lLen($job_key) && !empty($job = $this->redis->brPop($job_key, $idle_time))) {
-            unset($job_key, $idle_time);
-            return $job;
+            if ('' !== ($job[1] = trim($job[1]))) {
+                unset($job_key, $idle_time);
+                return $job;
+            }
         }
 
         //Remove empty job list
         $this->redis->sRem($this->key_slot['listen'], $job_key);
 
-        unset($job_key, $idle_time);
+        unset($job_key, $idle_time, $job);
         return [];
     }
 
@@ -746,7 +738,6 @@ class libQueue extends Factory
      * @param string $type
      *
      * @return string
-     * @throws \Exception
      */
     private function getLogKey(string $type): string
     {
@@ -773,22 +764,22 @@ class libQueue extends Factory
     }
 
     /**
-     * Call delay unit process
+     * Call delay process
      *
      * @param string $cmd
      */
-    private function callUnitDelay(string $cmd): void
+    private function callDelay(string $cmd): void
     {
         pclose(popen($cmd, 'r'));
         unset($cmd);
     }
 
     /**
-     * Call realtime unit process
+     * Call realtime process
      *
      * @param string $cmd
      */
-    private function callUnitRealtime(string $cmd): void
+    private function callRealtime(string $cmd): void
     {
         //Count running processes
         $runs = count($this->getKeys($this->key_slot['watch']));
@@ -826,7 +817,7 @@ class libQueue extends Factory
     }
 
     /**
-     * Execute job
+     * Execute a job
      *
      * @param string  $json
      * @param Router  $router
@@ -953,8 +944,7 @@ class libQueue extends Factory
     }
 
     /**
-     * Check job
-     * Only accept true
+     * Check job, only accept true
      *
      * @param array $result
      */
