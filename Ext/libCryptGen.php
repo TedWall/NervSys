@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Crypt Key Generator Extension
+ * Crypt KeyGen Extension
  *
  * Copyright 2016-2021 秋水之冰 <27206617@qq.com>
  *
@@ -20,19 +20,21 @@
 
 namespace Ext;
 
+use Core\Factory;
+
 /**
  * Class libCryptGen
  *
  * @package Ext
  */
-class libCryptGen
+class libCryptGen extends Factory
 {
     /**
      * Create Crypt Key
      *
      * @return string (32 bits)
      */
-    public static function create(): string
+    public function create(): string
     {
         return hash('md5', uniqid(mt_rand(), true));
     }
@@ -44,7 +46,7 @@ class libCryptGen
      *
      * @return array
      */
-    public static function extract(string $key): array
+    public function extract(string $key): array
     {
         $keys = [];
 
@@ -64,14 +66,14 @@ class libCryptGen
      *
      * @return string (40 bits)
      */
-    public static function obscure(string $key): string
+    public function obscure(string $key): string
     {
         $unit = str_split($key, 4);
 
         foreach ($unit as $k => $v) {
             $unit_key = $v[0];
 
-            if (self::getKvMode($k, $unit_key)) {
+            if ($this->getKvMode($k, $unit_key)) {
                 $v = strrev($v);
             }
 
@@ -91,14 +93,14 @@ class libCryptGen
      *
      * @return string (32 bits)
      */
-    public static function rebuild(string $key): string
+    public function rebuild(string $key): string
     {
         $unit = str_split($key, 5);
 
         foreach ($unit as $k => $v) {
             $unit_key  = substr($v, -1, 1);
             $unit_item = substr($v, 0, 4);
-            $unit[$k]  = self::getKvMode($k, $unit_key) ? strrev($unit_item) : $unit_item;
+            $unit[$k]  = $this->getKvMode($k, $unit_key) ? strrev($unit_item) : $unit_item;
         }
 
         $key = implode($unit);
@@ -115,7 +117,7 @@ class libCryptGen
      *
      * @return bool
      */
-    private static function getKvMode(int $k, string $v): bool
+    private function getKvMode(int $k, string $v): bool
     {
         return 0 === ($k & ord($v));
     }
